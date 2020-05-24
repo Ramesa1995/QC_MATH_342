@@ -1,0 +1,176 @@
+---
+title: "R project"
+author: "Rameasa Arna"
+output:
+   word_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Load libraries
+
+```{r}
+pacman::p_load(dplyr,tidyr,missForest, ggplot2,magrittr,stringr,mlr,ggmap)
+
+```
+
+## Load Housing Data
+
+```{r}
+set.seed(5)
+raw_housing_data <- read.csv("housing_data_2016_2017.csv")
+hd <- raw_housing_data[,-c(0:28)]
+hd <- select(hd,-c(model_type,fuel_type,date_of_sale,url))
+unique(hd$coop_condo)
+```
+
+## Process data (cleaning and extracting)
+
+```{r}
+
+#process pet allow columns
+hd <- mutate(hd, dogs_allowed = ifelse(substr(hd$dogs_allowed,1,3)=="no",0,1))
+hd <- mutate(hd, cats_allowed = ifelse(substr(hd$cats_allowed,1,3)=="no",0,1))
+hd <- mutate(hd,pets_allowed = ifelse(cats_allowed + dogs_allowed > 0, 1, 0))
+#process CoopCondo
+hd <- mutate(hd, coop_condo = factor(tolower(coop_condo)))
+#convert garage column to binary
+#if those keyword true replace with 1
+hd <- mutate(hd,garage_exists = replace(garage_exists, (garage_exists== "eys" | garage_exists== "UG" | garage_exists== "Underground" |garage_exists == "yes" | garage_exists== "Yes"),1))
+
+```
+
+```{r}
+
+
+#change variable Types
+hd$listing_price_to_nearest_1000 <- as.numeric(hd$listing_price_to_nearest_1000)
+hd$approx_year_built <-  as.numeric(hd$approx_year_built)
+hd$community_district_num <- as.numeric(hd$community_district_num)
+hd$num_bedrooms <- as.numeric(hd$num_bedrooms)
+hd$num_floors_in_building  <- as.numeric(hd$num_floors_in_building)
+hd$num_full_bathrooms <-as.numeric(hd$num_full_bathrooms)
+hd$num_half_bathrooms  <- as.numeric(hd$num_half_bathrooms)
+hd$num_total_rooms <-  as.numeric(hd$num_total_rooms)
+hd$pct_tax_deductibl <-  as.numeric(hd$pct_tax_deductibl)
+hd$dining_room_type <- as.factor(hd$dining_room_type)
+hd$kitchen_type <- as.factor(hd$kitchen_type)
+hd$garage_exists <-  as.numeric(hd$garage_exists)
+hd$garage_exists[is.na(hd$garage_exists )] <- 0
+hd$coop_condo <-  as.numeric(hd$coop_condo)
+hd$parking_charges <-  as.numeric(hd$parking_charges)
+hd$sale_price <- as.numeric(hd$sale_price)
+hd$sq_footage <-  as.numeric(hd$sq_footage)
+hd$total_taxes <- as.numeric(hd$total_taxes)
+hd$walk_score <- as.numeric(hd$walk_score)
+hd$common_charges <- as.numeric(hd$common_charges)
+hd$maintenance_cost <- as.numeric(hd$maintenance_cost)
+hd$maintenance_cost[is.na(hd$maintenance_cost)] <- 0
+hd$common_charges[is.na(hd$common_charges)] <- 0
+hd$monthly_cost <- as.numeric(hd$common_charges) + as.numeric(hd$maintenance_cost)
+
+#calculate price per square feet
+hd$price_persqft <-  as.numeric(hd$listing_price_to_nearest_1000/hd$sq_footage)
+
+#remove full address
+hd <- select(hd,-c(full_address_or_zip_code,listing_price_to_nearest_1000))
+hd <- select(hd,-c(common_charges,maintenance_cost))
+#remove dog and cat allow column
+hd <- select(hd,-c(dogs_allowed,cats_allowed))
+
+#printSummary Continuos
+summary(hd)
+
+```
+## Missing Values
+```{r}
+sapply(hd, function(x) sum(is.na(hd)))
+
+```
+
+## Features Imputation
+
+```{r}
+imputed_hd <- missForest(hd)
+
+```
+
+
+## Train-Test Split 
+
+```{r}
+#Split data to train and test data
+hd_new <- imputed_hd$ximp[!is.na(hd$sale_price ),]
+
+
+sale_price <- hd$sale_price[!is.na(hd$sale_price )]
+hd_new<-cbind(hd_new,sale_price)
+
+
+
+
+train <- hd_new[1:396,]
+
+test <- hd_new[397:528,]
+
+```
+
+
+## REGRESSION TREE
+
+```{r}
+
+#calculate Rsquare
+rsq <- function(x, y) summary(lm(y~x))$r.squared
+
+pacman::p_load(rsample,rpart,rpart.plot,ipred,caret)
+regTree = rpart(
+  formula = sale_price ~ .,
+  data = train,
+  method = "anova"
+)
+printcp(regTree)
+rpart.plot(regTree)
+plotcp(regTree)
+summary(regTree)
+predicted = predict(regTree, test)
+e = predicted - test$sale_price
+sqrt(sum(e^2))
+rsq(predicted, test$sale_price)
+```
+## Linear Regression
+
+```{r}
+
+
+linear = lm(sale_price ~ ., data = train)## simple linear model
+summary(linear)
+
+predicted = predict(linear, test)
+e = predicted - test$sale_price
+sqrt(sum(e^2) )
+
+rsq(predicted, test$sale_price)
+```
+
+## Random Forest 
+
+```{r}
+RF <- randomForest(
+  formula = sale_price ~ .,
+  data = train
+)
+RF
+which.min(RF$mse)
+sqrt(RF$mse[which.min(RF$mse)])
+
+predicted = predict(RF,test)
+e = predicted - test$sale_price
+sqrt(sum(e^2))
+rsq(predicted, test$sale_price)
+```
+
+
+
